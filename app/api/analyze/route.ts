@@ -1,38 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { CredibilityResult } from "@/lib/analysis/types";
-
-/** Fixed mock result for the first iteration (no real analysis yet). */
-const MOCK_RESULT: CredibilityResult = {
-  score: 65,
-  label: "medium",
-  explanation:
-    "This is a placeholder result. Real analysis (source checks, fact-checking, bias detection) will be added in a later iteration.",
-  subscores: {
-    sourceReliability: 70,
-    factualConsistency: 60,
-    toneAndBias: 65,
-  },
-};
+import { analyzeWithLLM } from "@/lib/analysis/llm";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const _url = typeof body.url === "string" ? body.url : undefined;
-    const _rawText = typeof body.rawText === "string" ? body.rawText : undefined;
+    const rawText = typeof body.rawText === "string" ? body.rawText.trim() : "";
 
-    // Validate: require at least one input (content ignored for now)
-    if (!_url && !_rawText) {
+    if (!rawText) {
       return NextResponse.json(
-        { error: "Provide either 'url' or 'rawText' in the request body." },
+        { error: "Provide 'rawText' in the request body." },
         { status: 400 }
       );
     }
 
-    return NextResponse.json(MOCK_RESULT);
-  } catch {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey || apiKey.trim() === "") {
+      return NextResponse.json(
+        { error: "Analysis is temporarily unavailable." },
+        { status: 503 }
+      );
+    }
+
+    const result = await analyzeWithLLM(rawText);
+    return NextResponse.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Analysis failed.";
+    const name = err instanceof Error ? err.name : "Unknown";
+    // #region agent log
+    fetch("http://127.0.0.1:7435/ingest/181214b3-ee0a-4928-8107-89f3d7fe4a73", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "e65d2e" },
+      body: JSON.stringify({
+        sessionId: "e65d2e",
+        location: "app/api/analyze/route.ts:catch",
+        message: "Analyze failed",
+        data: { errorMessage: message, errorName: name },
+        timestamp: Date.now(),
+        hypothesisId: "H1-H4",
+      }),
+    }).catch(() => {});
+    // #endregion
+    if (message === "ANTHROPIC_API_KEY is not set") {
+      return NextResponse.json(
+        { error: "Analysis is temporarily unavailable." },
+        { status: 503 }
+      );
+    }
     return NextResponse.json(
-      { error: "Invalid request body." },
-      { status: 400 }
+      { error: `Analysis failed: ${message}` },
+      { status: 502 }
     );
   }
 }
