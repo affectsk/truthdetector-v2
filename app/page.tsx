@@ -19,7 +19,7 @@ export default function Home() {
             Separate signal from spin.
           </p>
         </header>
-        <AnalyzeForm onResult={setResult} />
+        <AnalyzeForm onResult={setResult} onRequestStart={() => setResult(null)} />
         {result && <ResultCard result={result} />}
       </main>
     </div>

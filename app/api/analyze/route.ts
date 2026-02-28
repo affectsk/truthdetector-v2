@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeWithLLM } from "@/lib/analysis/llm";
+import { extractArticleFromUrl } from "@/lib/extractArticle";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
+    const url = typeof body.url === "string" ? body.url.trim() : "";
     const rawText = typeof body.rawText === "string" ? body.rawText.trim() : "";
 
-    if (!rawText) {
+    const hasUrl = url.length > 0;
+    const hasText = rawText.length > 0;
+    if (!hasUrl && !hasText) {
       return NextResponse.json(
-        { error: "Provide 'rawText' in the request body." },
+        { error: "Provide 'url' or 'rawText' in the request body." },
+        { status: 400 }
+      );
+    }
+    if (hasUrl && hasText) {
+      return NextResponse.json(
+        { error: "Provide either 'url' or 'rawText', not both." },
         { status: 400 }
       );
     }
@@ -21,7 +31,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await analyzeWithLLM(rawText);
+    let textToAnalyze: string;
+    if (hasUrl) {
+      try {
+        textToAnalyze = await extractArticleFromUrl(url);
+      } catch (extractErr) {
+        const msg = extractErr instanceof Error ? extractErr.message : "Could not fetch or extract article from URL.";
+        return NextResponse.json(
+          { error: msg },
+          { status: 502 }
+        );
+      }
+    } else {
+      textToAnalyze = rawText;
+    }
+
+    const result = await analyzeWithLLM(textToAnalyze);
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Analysis failed.";
